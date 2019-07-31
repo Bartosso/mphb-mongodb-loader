@@ -8,5 +8,5 @@ libraryDependencies ++= Seq(
   // https://mvnrepository.com/artifact/org.reactivemongo/reactivemongo
   "org.reactivemongo" %% "reactivemongo" % "0.18.3",
   // https://mvnrepository.com/artifact/org.slf4j/slf4j-simple
-  "org.slf4j" % "slf4j-simple" % "1.7.26" % Test
+  "org.slf4j" % "slf4j-simple" % "1.7.26"
 )
