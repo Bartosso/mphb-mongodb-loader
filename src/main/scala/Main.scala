@@ -3,25 +3,24 @@ import reactivemongo.api.commands.WriteResult
 import reactivemongo.api.{DefaultDB, MongoConnection, MongoDriver}
 import reactivemongo.bson.BSONDocument
 
-import scala.concurrent.{ExecutionContext, Future}
-import scala.util.{Failure, Success}
+import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.duration._
+import scala.util.{Failure, Success, Try}
 
 object Main {
-  val mongoUri = "mongodb://localhost:27017/mydb?authMode=scram-sha1"
+  val mongoUri = "mongodb://localhost:27017/firstdb"
 
   import ExecutionContext.Implicits.global // use any appropriate context
 
   // Connect to the database: Must be done only once per application
   val driver = MongoDriver()
-  val parsedUri = MongoConnection.parseURI(mongoUri)
-  val connection = parsedUri.map(driver.connection(_))
 
-  // Database and collections: Get references
-  val futureConnection = Future.fromTry(connection)
-
-  def db1: Future[DefaultDB] = futureConnection.flatMap(_.database("firstdb"))
-  def db2: Future[DefaultDB] = futureConnection.flatMap(_.database("anotherdb"))
-  def personCollection: Future[BSONCollection] = db1.map(_.collection("person"))
+  val database: Future[DefaultDB] = for {
+    url <- Future.fromTry(MongoConnection.parseURI(mongoUri))
+    con = driver.connection(url)
+    dn <- Future(url.db.get)
+    db <- con.database(dn)
+  } yield db
 
   val document1 = BSONDocument(
     "firstName" -> "Stephane",
@@ -42,10 +41,10 @@ object Main {
   }
 
   def main(args: Array[String]): Unit = {
-    personCollection.onComplete {
-      case Failure(e) => e.printStackTrace()
-      case Success(collection) => simpleInsert(collection)
-    }
+    val personCollection = database.map(_.collection("person"))
+    val res = personCollection.map(simpleInsert(_))
+    Await.ready(res, 60.seconds)
+    driver.close()
   }
 }
 
