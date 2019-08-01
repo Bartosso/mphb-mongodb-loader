@@ -3,12 +3,17 @@ import reactivemongo.api.commands.WriteResult
 import reactivemongo.api.{DefaultDB, MongoConnection, MongoDriver}
 import reactivemongo.bson.BSONDocument
 
-import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.concurrent.duration._
-import scala.util.{Failure, Success, Try}
+import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.language.postfixOps
 
 object Main {
-  val mongoUri = "mongodb://localhost:27017/firstdb"
+
+  implicit val connectionAskCloseDuration: FiniteDuration = 15 second
+  val awaitMongoShitSuicideDuration: FiniteDuration = 15 second
+  val bdName = "firstdb"
+
+  val mongoUri = s"mongodb://localhost:27017/$bdName"
 
   import ExecutionContext.Implicits.global // use any appropriate context
 
@@ -17,34 +22,41 @@ object Main {
 
   val database: Future[DefaultDB] = for {
     url <- Future.fromTry(MongoConnection.parseURI(mongoUri))
-    con = driver.connection(url)
-    dn <- Future(url.db.get)
-    db <- con.database(dn)
+    con = driver.connection(url, strictUri = true).getOrElse(throw new IllegalStateException("Юра, бд пошла по пизде"))
+    dn  = url.db.getOrElse(throw new IllegalArgumentException("Юра проебал юрл"))
+    db  <- con.database(dn)
   } yield db
 
   val document1 = BSONDocument(
     "firstName" -> "Stephane",
-    "lastName" -> "Godbillon",
-    "age" -> 29)
+    "lastName"  -> "Godbillon",
+    "age"       -> 29)
 
   // Simple: .insert.one(t)
-  def simpleInsert(coll: BSONCollection): Future[Unit] = {
-    val writeRes: Future[WriteResult] = coll.insert.one(document1)
+  def simpleInsert(coll: BSONCollection): Future[WriteResult] =
+    coll
+      .insert
+      .one(document1)
+      .map { wr =>
+        println(s"successfully inserted document with result: $wr")
+        wr
+      }
 
-    writeRes.onComplete { // Dummy callbacks
-      case Failure(e) => e.printStackTrace()
-      case Success(writeResult) =>
-        println(s"successfully inserted document with result: $writeResult")
-    }
-
-    writeRes.map(_ => {}) // in this example, do nothing with the success
-  }
+  def killMongo: Future[Unit] =  for {
+    db <- database
+    _ <- db.connection.askClose()
+    _ = driver.close()
+  } yield ()
 
   def main(args: Array[String]): Unit = {
     val personCollection = database.map(_.collection("person"))
-    val res = personCollection.map(simpleInsert(_))
-    Await.ready(res, 60.seconds)
-    driver.close()
+    Await
+      .result(
+        personCollection
+          .flatMap(simpleInsert)
+          .flatMap(_ => killMongo),
+        awaitMongoShitSuicideDuration
+      )
   }
 }
 
